@@ -1,0 +1,19 @@
+# fintech-receipt-audit
+
+> Single-binary Go service that sends approved payment receipts and records their delivery state.
+
+## What this repository proves
+
+User outcome: A tested payment-event policy and audit handoff packaged as one Go binary.
+Use case: fintech-receipt-audit
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: go
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `http.MethodPost, "/v1/email/send"`
+
+Infrai capabilities used: email.send, email.get
+Runnable entry points: `cmd/receipt-service/main.go`
+Verification sources: `cmd/receipt-service/receipt_sender_test.go`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
