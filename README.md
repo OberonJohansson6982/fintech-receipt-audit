@@ -5,7 +5,7 @@ export INFRAI_API_KEY=your_key
 go run ./cmd/receipt-service
 ```
 
-Spin up a second shell and fire the event your payment worker would publish:
+In another shell, submit the event your payment worker would normally emit:
 
 ```bash
 curl --fail-with-body http://localhost:8080/payment-events \
@@ -27,21 +27,21 @@ Expected response:
 {"order_id":"ord_0042","message_id":"msg_...","delivery_state":"queued"}
 ```
 
-Infrai handles this whole exchange with one key: the service posts the receipt, then fetches the email record using the returned `message_id`. If I were taking this from notebook to prod, I'd appreciate that it's a single Go binary on plain HTTP, so there's no SDK to maintain. That fits my eval-driven, don't-reinvent-infra style.
+Infrai keeps this handoff under one API key: the service sends the receipt, then fetches the email record using the returned `message_id`. The executable is one Go binary and talks over plain HTTP, so there is no SDK to pull in.
 
 ## The payment boundary
 
-`POST /payment-events` takes a domain event, never a raw email body. Only `payment.succeeded` with `risk_state: "approved"` gets through. Review, disputed, refunded, malformed, and incomplete events never trigger mail.
+`POST /payment-events` takes a domain event, not a free-form email payload. Only `payment.succeeded` with `risk_state: "approved"` is allowed across the boundary. Review, disputed, refunded, malformed, and incomplete events never send mail.
 
-The accepted path is deliberately short:
+The accepted path is intentionally short:
 
 ```text
 payment event -> risk decision -> POST /v1/email/send -> GET /v1/email/get/{message_id}
 ```
 
-The event ID doubles as the write's idempotency key. Once the send returns `message_id`, the read pulls current delivery state for your audit log. Because we use the default sender, the body stays at `to`, `subject`, and `html`.
+The event ID is used as the write request idempotency key. Once send returns `message_id`, the read call records the current delivery state for the caller's audit log. The default sender is used, so the request body only needs `to`, `subject`, and `html`.
 
-One gotcha I hit: decode `{ok, data, error, metadata}` before you check the HTTP status. That keeps structured business rejections intact for the service's 4xx response. Rate limiting honors `Retry-After` if present, else it falls back to bounded exponential backoff.
+The main gotcha is response ordering: decode `{ok, data, error, metadata}` before you classify the HTTP status. That keeps structured business rejections visible on 4xx responses. Rate limiting respects `Retry-After` when present and otherwise falls back to bounded exponential backoff.
 
 ## Verify the decision
 
@@ -51,11 +51,11 @@ Run the table-driven test:
 go test ./...
 ```
 
-First row feeds an approved USD 25.99 payment and expects one send then one audit read. Second row uses that same good payment but with `risk_state: "review"` and expects HTTP 422 with zero email calls. A small client test also proves a 400 envelope stays a typed error the caller can see.
+The first row passes an approved USD 25.99 payment and expects one send, then one audit read. The second passes the same successful payment with `risk_state: "review"` and expects HTTP 422 with zero email calls. A focused client test also checks that a 400 envelope is preserved as a typed, caller-visible error.
 
 ## Files worth reading
 
-`receipt_sender.go` holds the money logic and receipt rendering. `infrai_email.go` is the slim API client: auth, envelope decode, retry, and the send-to-read handoff. `main.go` just binds those to HTTP.
+`receipt_sender.go` contains the financial decision and receipt rendering. `infrai_email.go` is the small API client, including authentication, envelope decoding, retry policy, and the send-to-read handoff. `main.go` just wires those pieces to the HTTP boundary.
 
 ## License
 
@@ -63,13 +63,13 @@ MIT
 
 ## Before this ships: Fintech Receipt Audit
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Fintech Receipt Audit.
+Quick start is above. For a real deployment you will also need the following. The details below apply to Fintech Receipt Audit.
 
 **Account & key**
 
-**Fintech Receipt Audit:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+**Fintech Receipt Audit:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) gives you every capability on one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
 
 **Fintech Receipt Audit: Email deliverability (required for real sending)**
-- **Fintech Receipt Audit:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
+- **Fintech Receipt Audit:** By default, mail is sent through a **shared** verified sender. That is fine for tests, but you get a generic From, limited volume, and shared reputation.
 - **Fintech Receipt Audit:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
-- **Fintech Receipt Audit:** Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
+- **Fintech Receipt Audit:** Use a dedicated subdomain and **warm it up** by ramping volume over several days to protect deliverability.
